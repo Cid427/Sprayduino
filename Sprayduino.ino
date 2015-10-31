@@ -4,14 +4,17 @@
 
   Reads voltage from Throttle Position Sensor on analog pin 2,
   Turns on or off a nitrous activation solenoid on digital pin 7
+  
+  Last modified Oct 31 2015
+  by Troy Bernakevitch
 */
 
 
 // USER DEFINED VALUES,   --- hope to move to a setup menu in the future
 int ActivePercent = 95; // percentage of throttle opening at which to activate nitrous
-int tpsMIN = 0; // TPS voltage at closed throttle - future to be programmable
-int tpsMAX = 5; // TPS volage at WOT - future to be programmable
-// int LowVoltProtect; // not used yet, but for a low voltage protection to shut down nitrous system
+int tpsMIN = 0; // TPS at closed throttle - future to be programmable
+int tpsMAX = 1023; // TPS at WOT - future to be programmable
+int LowVoltProtect; // not used yet, but for a low voltage protection to shut down nitrous system
 
 // Constants won't change:
 const int TPSpin = A2; //TPS Pin connected to Analog 2
@@ -20,7 +23,6 @@ const int NitrousRelay = 7; //Relay connected to Digital 7
 // Variables will change:
 int TPSCurrentStatus = 0;
 int TPSLastStatus = 0;
-int tpsADC = 0;
 
 void setup() {
   Serial.begin(9600); //for debug only, comment out for realtime use
@@ -30,11 +32,27 @@ void setup() {
   pinMode(NitrousRelay, OUTPUT);
 
   //Turn OFF any power to the relay
-  digitalWrite(NitrousRelay, LOW);
+  digitalWrite(NitrousRelay, HIGH); //seems my relay board works backwards?
   delay(500); //half second delay
   Serial.println("Nitrous system is armed!"); // for debug purposes only
 }
 
 void loop() {
-  
-}
+  //read throttle postion sensor pin and convert to a percentage of throttle opening
+  TPSCurrentStatus = map(analogRead(TPSpin), tpsMIN, tpsMAX, 0, 100);
+  if (TPSCurrentStatus != TPSLastStatus) {
+    Serial.print(TPSCurrentStatus);
+    Serial.print("% ");
+    // turn on nitrous realy if TPS is above the 'Active Percent' set
+    if (TPSCurrentStatus > ActivePercent) {
+      digitalWrite(NitrousRelay, LOW);
+      Serial.print("  ");
+      Serial.print("Nitrous Activated");
+    } else if (TPSCurrentStatus < ActivePercent) {
+      digitalWrite(NitrousRelay, HIGH);
+    }
+    Serial.println();
+    TPSLastStatus = TPSCurrentStatus;
+  }
+  delay(1); //small delay fo stability , probably remove later if adding tach reading as that will be enough of a delay.
+}  
