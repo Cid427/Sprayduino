@@ -14,3 +14,7 @@ Will provide 5v to power an indepedant TPS.
   A safety timeout - shut off after n# seconds.
   
   Activation delay timer.
+  
+  Transbrake input - inhibit activation while transbrake is engaged.
+  
+  
