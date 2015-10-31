@@ -23,6 +23,7 @@ const int NitrousRelay = 7; //Relay connected to Digital 7
 // Variables will change:
 int TPSCurrentStatus = 0;
 int TPSLastStatus = 0;
+bool NitrousActive = false;
 
 void setup() {
   Serial.begin(9600); //for debug only, comment out for realtime use
@@ -38,21 +39,26 @@ void setup() {
 }
 
 void loop() {
+  
   //read throttle postion sensor pin and convert to a percentage of throttle opening
   TPSCurrentStatus = map(analogRead(TPSpin), tpsMIN, tpsMAX, 0, 100);
+  
   if (TPSCurrentStatus != TPSLastStatus) {
     Serial.print(TPSCurrentStatus);
     Serial.print("% ");
     // turn on nitrous realy if TPS is above the 'Active Percent' set
     if (TPSCurrentStatus > ActivePercent) {
       digitalWrite(NitrousRelay, LOW);
-      Serial.print("  ");
-      Serial.print("Nitrous Activated");
+      NitrousActive = true;
     } else if (TPSCurrentStatus < ActivePercent) {
       digitalWrite(NitrousRelay, HIGH);
+      NitrousActive = false;
+    }
+    if (NitrousActive == true) {
+      Serial.print(" ");
+      Serial.print("Nitrous Active");
     }
     Serial.println();
     TPSLastStatus = TPSCurrentStatus;
   }
-  delay(1); //small delay fo stability , probably remove later if adding tach reading as that will be enough of a delay.
-}  
+}
