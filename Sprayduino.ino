@@ -3,22 +3,23 @@
   Turns on or off nitrous control relay based on TPS position.
 
   Reads voltage from Throttle Position Sensor on analog pin 2,
-  Turns on or off a nitrous activation solenoid on digital pin 7
+  Turns on or off nitrous activation relays on digital pin 7 and 8
   
-  Last modified Oct 31 2015
+  Last modified Nov 01 2015
   by Troy Bernakevitch
 */
 
-
 // USER DEFINED VALUES,   --- hope to move to a setup menu in the future
-int ActivePercent = 95; // percentage of throttle opening at which to activate nitrous
 int tpsMIN = 0; // TPS at closed throttle - future to be programmable
 int tpsMAX = 1023; // TPS at WOT - future to be programmable
-int LowVoltProtect; // not used yet, but for a low voltage protection to shut down nitrous system
+byte ActivePercent = 95; // percentage of throttle opening at which to activate nitrous
+byte LowVoltProtect; // for low voltage protection to shut down nitrous system
 
 // Constants won't change:
-const int TPSpin = A2; //TPS Pin connected to Analog 2
-const int NitrousRelay = 7; //Relay connected to Digital 7
+const byte TPSpin = A2; //TPS Pin connected to Analog 2
+const byte NitrousRelay1 = 7; //Relay 1 connected to Digital 7
+const byte NitrousRelay2 = 8; //Relay 2 connected to Digital 8, either as 2nd stage or together with relay 1
+const byte TransBrakeIn = 9; //Input for Transbrake connected to Digital 9
 
 // Variables will change:
 int TPSCurrentStatus = 0;
@@ -30,10 +31,11 @@ void setup() {
 
   //Setup Pins
   pinMode(TPSpin, INPUT);
-  pinMode(NitrousRelay, OUTPUT);
+  pinMode(NitrousRelay1, OUTPUT);
 
   //Turn OFF any power to the relay
-  digitalWrite(NitrousRelay, HIGH); //seems my relay board works backwards?
+  digitalWrite(NitrousRelay1, HIGH); //seems my relay board works backwards?
+  digitalWrite(NitrousRelay2, HIGH);
   delay(500); //half second delay
   Serial.println("Nitrous system is armed!"); // for debug purposes only
 }
@@ -48,10 +50,10 @@ void loop() {
     Serial.print("% ");
     // turn on nitrous realy if TPS is above the 'Active Percent' set
     if (TPSCurrentStatus > ActivePercent) {
-      digitalWrite(NitrousRelay, LOW);
+      digitalWrite(NitrousRelay1, LOW);
       NitrousActive = true;
     } else if (TPSCurrentStatus < ActivePercent) {
-      digitalWrite(NitrousRelay, HIGH);
+      digitalWrite(NitrousRelay1, HIGH);
       NitrousActive = false;
     }
     if (NitrousActive == true) {
@@ -62,3 +64,20 @@ void loop() {
     TPSLastStatus = TPSCurrentStatus;
   }
 }
+
+void CheckButtons() {
+  
+}
+
+void GetRPM() {
+  
+}
+
+void NitrousOnOff() {
+  
+}
+
+void UpdateDisplay() {
+  
+}
+
