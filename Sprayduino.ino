@@ -17,9 +17,10 @@ byte LowVoltProtect; // for low voltage protection to shut down nitrous system
 
 // Constants won't change:
 const byte TPSpin = A2; //TPS Pin connected to Analog 2
+const byte Voltpin = A4; //Input to monitor Battery Voltage on analog 4
+const byte TransBrakepin = 9; //Input for Transbrake connected to Digital 9
 const byte NitrousRelay1 = 7; //Relay 1 connected to Digital 7
 const byte NitrousRelay2 = 8; //Relay 2 connected to Digital 8, either as 2nd stage or together with relay 1
-const byte TransBrakeIn = 9; //Input for Transbrake connected to Digital 9
 
 // Variables will change:
 int TPSCurrentStatus = 0;
@@ -31,7 +32,10 @@ void setup() {
 
   //Setup Pins
   pinMode(TPSpin, INPUT);
+  pinMode(Voltpin, INPUT);
+  pinMode(TransBrakepin, INPUT);
   pinMode(NitrousRelay1, OUTPUT);
+  pinMode(NitrousRelay2, OUTPUT); 
 
   //Turn OFF any power to the relay
   digitalWrite(NitrousRelay1, HIGH); //seems my relay board works backwards?
