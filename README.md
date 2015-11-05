@@ -6,6 +6,8 @@ a nitrous system solenoids.
 
 Will provide 5v to power an indepedant TPS.
 
+Transbrake input - inhibit activation while transbrake is engaged.
+
 #Future plans
   Read engine RPM from tach.
   
@@ -13,8 +15,8 @@ Will provide 5v to power an indepedant TPS.
   
   A safety timeout - shut off after n# seconds.
   
-  Activation delay timer.
+  Activation delay timer - on trans brake release.
   
-  Transbrake input - inhibit activation while transbrake is engaged.
+  
   
   
