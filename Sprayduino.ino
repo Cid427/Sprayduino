@@ -139,11 +139,13 @@ void CheckTransBrake() {
   if (digitalRead(TransBrakepin) == HIGH) {
     AllowNitrousTransBrake = false;
     TransBrakeActive = true;
-  } else
+  }
+  else  {
     AllowNitrousTransBrake = true;
-  TransBrakeActive = false;
-
+    TransBrakeActive = false;
+  }
 }
+
 
 void GetRPM() {
   unsigned long PulseTime = micros();
@@ -168,10 +170,12 @@ void NitrousOnOff() {
     digitalWrite(NitrousRelay1, LOW);
     digitalWrite(NitrousActiveled, HIGH);
     NitrousActive = true;
-  } else
+  }
+  else {
     digitalWrite(NitrousRelay1, HIGH);
-  digitalWrite(NitrousActiveled, LOW);
-  NitrousActive = false;
+    digitalWrite(NitrousActiveled, LOW);
+    NitrousActive = false;
+  }
 }
 
 void UpdateDisplay() {
