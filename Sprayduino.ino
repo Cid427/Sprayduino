@@ -12,9 +12,7 @@
     Minimum and maximum rpm for nitrous activation - window switch.
     Nitrous activation delay timer.
     Menu system to make settings user configurable - will need an LCD and buttons,rotary,etc.
-    Datalogging to SD card.
-    Add more sensors. Oil, water, fuel pressure, etc. Nitrous activation based on minimum oil pressure, etc.
-    Battery reference voltage - if datalogging or maybe even if not? low voltage shutoff.
+    Battery reference voltage -  low voltage shutoff.
     Transbrake input - option to inhibit activation while transbrake is engaged.
 
   Last modified Nov 4 2015
@@ -27,6 +25,7 @@
 int tpsMIN = 0; // TPS at closed throttle - future to be programmable
 int tpsMAX = 1023; // TPS at WOT - future to be programmable
 byte ActivePercent = 95; // percentage of throttle opening at which to activate nitrous
+unsigned long DelayTime = 0; // The amount of time to delay nitrous activation on release of transbrake
 byte LowVoltProtect = 11; // for low voltage protection to shut down nitrous system
 byte PPR = 4;// Pulses Per Revolution, 4 for 8 cyl, 3 for 6 cyl, and 2 for 4 cyl.
 
@@ -56,7 +55,7 @@ bool AllowNitrousTPS = false;
 
 //** for Trans Brake **//
 bool AllowNitrousTransBrake = false;
-bool TransBrakeActive = false;
+bool TransBrakeState = false;
 
 bool NitrousActive = false;
 
@@ -135,17 +134,18 @@ void CheckButtons() {
 
 }
 
-void CheckTransBrake() {
-  if (digitalRead(TransBrakepin) == HIGH) {
-    AllowNitrousTransBrake = false;
-    TransBrakeActive = true;
-  }
-  else  {
-    AllowNitrousTransBrake = true;
-    TransBrakeActive = false;
+  TransBrakeState = digitalRead(TransBrakepin);
+
+  if (!DelayTime) { // if there is no delay time
+
+    if (TransBrakeState == HIGH && NitrousOnBrake == false) {
+      AllowNitrousTransBrake = false;
+    }
+    else  {
+      AllowNitrousTransBrake = true;
+    }
   }
 }
-
 
 void GetRPM() {
   unsigned long PulseTime = micros();
@@ -182,17 +182,17 @@ void UpdateDisplay() {
   if (TPSCurrentStatus != TPSLastStatus) {
     Serial.print(TPSCurrentStatus);
     Serial.print("% ");
-  if (NitrousActive == true) {
-    Serial.print(" ");
-    Serial.print("Nitrous Active");
-  }
-  Serial.println();
+    if (TransBrakeState == true) {
+      Serial.print(" ");
+      Serial.print("TransBrake On");
+    }
+    if (NitrousActive == true) {
+      Serial.print(" ");
+      Serial.print("Nitrous Active");
+    }
+    Serial.println();
   }
   TPSLastStatus = TPSCurrentStatus;
-}
-
-void LoadConfig() {
-
 }
 
 void CheckConfig() {
