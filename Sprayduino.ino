@@ -134,10 +134,10 @@ void CheckButtons() {
 
 }
 
+void CheckTransBrake() {
   TransBrakeState = digitalRead(TransBrakepin);
 
   if (!DelayTime) { // if there is no delay time
-
     if (TransBrakeState == HIGH && NitrousOnBrake == false) {
       AllowNitrousTransBrake = false;
     }
@@ -145,6 +145,7 @@ void CheckButtons() {
       AllowNitrousTransBrake = true;
     }
   }
+  
 }
 
 void GetRPM() {
