@@ -1,8 +1,8 @@
 # Sprayduino
 Aurduino based automotive nitrous system controller
 
-Reads analog voltage from a Throttle Postion Sensor and will turn on or off 
-a nitrous system solenoids. 
+Reads analog voltage from a 5 volt Throttle Postion Sensor(TPS) or a microswitch on the throttle
+and will turn on or off a nitrous systems solenoids. 
 
 Will provide 5v to power an indepedant TPS.
 
@@ -17,8 +17,10 @@ Activation delay timer - on trans brake release.
   
   A safety timeout - shut off after n# seconds.
   
-
+  Option to start delay timer from WOT.
   
+  PWM control of solenoids?
   
+  Better organize and fix the mess of code I created.
   
-  
+  Create PCB.
