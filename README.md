@@ -8,6 +8,8 @@ Will provide 5v to power an indepedant TPS.
 
 Transbrake input - inhibit activation while transbrake is engaged.
 
+Activation delay timer - on trans brake release.
+
 #Future plans
   Read engine RPM from tach.
   
@@ -15,7 +17,7 @@ Transbrake input - inhibit activation while transbrake is engaged.
   
   A safety timeout - shut off after n# seconds.
   
-  Activation delay timer - on trans brake release.
+
   
   
   
