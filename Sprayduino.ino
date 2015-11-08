@@ -5,15 +5,15 @@
   Reads voltage from Throttle Position Sensor on analog pin 2,
   Read Trans Brake input on digital pin 7 to inhibit nitrous activation
   Turns on or off nitrous activation relays on digital pin 9 and 10
-
+  Transbrake input on digital pin 7 to inhibit activation while transbrake is engaged.
+  Nitrous activation delay timer- started by release of the transbrake.
+  
   Future plans:
     Nitrous relay safety timeout - shut off after n# seconds
     Read engine RPM fron tach.Safety time out
     Minimum and maximum rpm for nitrous activation - window switch.
-    Nitrous activation delay timer.
     Menu system to make settings user configurable - will need an LCD and buttons,rotary,etc.
     Battery reference voltage -  low voltage shutoff.
-    Transbrake input - option to inhibit activation while transbrake is engaged.
 
   Last modified Nov 4 2015
   by Troy Bernakevitch
@@ -26,6 +26,7 @@ int tpsMIN = 0; // TPS at closed throttle - future to be programmable
 int tpsMAX = 1023; // TPS at WOT - future to be programmable
 byte ActivePercent = 95; // percentage of throttle opening at which to activate nitrous
 unsigned long DelayTime = 0; // The amount of time to delay nitrous activation on release of transbrake
+bool NitrousOnBrake = false; // allow nitrous to be active when transbrake is on or not
 byte LowVoltProtect = 11; // for low voltage protection to shut down nitrous system
 byte PPR = 4;// Pulses Per Revolution, 4 for 8 cyl, 3 for 6 cyl, and 2 for 4 cyl.
 
@@ -55,9 +56,15 @@ bool AllowNitrousTPS = false;
 
 //** for Trans Brake **//
 bool AllowNitrousTransBrake = false;
-bool TransBrakeState = false;
+int TransBrakeState = 0;
+int LastTransBrakeState = 0;
 
 bool NitrousActive = false;
+
+//** for Nitrous Delay **//
+bool AllowNitrousDelay = false;
+bool NitrousDelay1Active = false;
+unsigned long PreviousDelayMillis;
 
 //** for RPM **//
 unsigned long LastPulseTime;
@@ -107,8 +114,17 @@ void loop() {
   }
 
   CheckTransBrake();
+
+  if (NitrousDelay1Active == true) {
+    NitrousDelay1();
+  }
+
   GetRPM();
+  
+  CheckVoltage(); //This really should not run every loop, 4 times a second at most would do.
+  
   CheckTPS();
+  
   NitrousOnOff();
 
   UpdateDisplay();
@@ -140,18 +156,47 @@ void CheckTransBrake() {
   if (!DelayTime) { // if there is no delay time
     if (TransBrakeState == HIGH && NitrousOnBrake == false) {
       AllowNitrousTransBrake = false;
-    }
-    else  {
+    } else  {
       AllowNitrousTransBrake = true;
+      AllowNitrousDelay = true;
     }
+  } else { // if there is a delay
+    if (TransBrakeState == HIGH && NitrousOnBrake == false) { //this dos'nt make sense if 'nitrousnobrake is false then there would be no way to start the timer anyway
+      AllowNitrousTransBrake = false;
+    } else if (TransBrakeState != LastTransBrakeState) {
+      if (TransBrakeState == LOW) {
+        AllowNitrousTransBrake = true;
+        NitrousDelay1Active = true;
+        Serial.println("TransBrake Released");
+        Serial.println("Delay Started");
+        PreviousDelayMillis = millis();
+        NitrousDelay1();
+      }
+    }
+    LastTransBrakeState = TransBrakeState;
   }
-  
+}
+
+void NitrousDelay1() {
+  AllowNitrousDelay = false;
+  unsigned long CurrentMillis;
+
+  CurrentMillis = millis();
+  if (CurrentMillis - PreviousDelayMillis >= DelayTime) {
+    AllowNitrousDelay = true;
+    Serial.println("Delay Ended");
+    NitrousDelay1Active = false;
+  }
 }
 
 void GetRPM() {
   unsigned long PulseTime = micros();
   PulseInterval = PulseTime - LastPulseTime;
   LastPulseTime = PulseTime;
+}
+
+void CheckVoltage() {
+
 }
 
 void CheckTPS() {
@@ -167,7 +212,7 @@ void CheckTPS() {
 }
 
 void NitrousOnOff() {
-  if (AllowNitrousTPS == true && AllowNitrousTransBrake == true) {
+  if (AllowNitrousTPS == true && AllowNitrousTransBrake == true && AllowNitrousDelay == true) {
     digitalWrite(NitrousRelay1, LOW);
     digitalWrite(NitrousActiveled, HIGH);
     NitrousActive = true;
