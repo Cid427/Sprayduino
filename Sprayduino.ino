@@ -14,6 +14,9 @@
     Nitrous relay safety timeout - shut off after n# seconds
     Menu system to make settings user configurable - will need an LCD and buttons,rotary,etc.
     Battery reference voltage -  low voltage shutoff.
+    Low voltage warning LED
+    Debounce the transbrake input
+    RPM Smoothing
 
   Last modified Nov 21 2015
   by Troy Bernakevitch
