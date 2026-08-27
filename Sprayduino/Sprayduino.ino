@@ -14,9 +14,9 @@
     Nitrous relay safety timeout - shut off after n# seconds
     Menu system to make settings user configurable - will need an LCD and buttons,rotary,etc.
       (LoadConfig/SaveConfig/CheckButtons are stubbed out below for this)
-    Battery reference voltage -  low voltage shutoff.
+    Battery reference voltage -  low voltage shutoff. -done
     Low voltage warning LED
-    RPM Smoothing
+    RPM Smoothing -done
     Second nitrous stage on NitrousRelay2 (currently wired but unused)
     Port to STM32 - add pins_stm32.h (see board_config.h)
 
@@ -29,10 +29,10 @@
   should never require editing this file - see board_config.h.
 */
 
-#include "boards.h" // pin numbers, ADC_MAX, and storage capability for this board
+#include "boards.h"       // pin numbers, ADC_MAX, and storage capability for this board
 #include "Settings.h"     // SettingsLoad()/SettingsSave() - board-specific storage lives here
 
-#define VERSION " Sprayduino V0.5"
+#define VERSION " Sprayduino V0.6"
 #define DEBUG (1)
 
 
@@ -43,13 +43,16 @@ int tpsMIN = 1; // TPS at closed throttle - future to be programmable
 int tpsMAX = ADC_MAX; // TPS at WOT - future to be programmable. Was hardcoded 1023; now follows this board's ADC resolution.
 int ThrottleType = 0; // Type 0 for a TPS or 1 for microswtich.
 byte ActivePercent = 95; // percentage of throttle opening at which to activate nitrous
+byte ThrottleHysteresis = 5; // percentage points below ActivePercent before nitrous cuts out.
 unsigned long Delay1Time = 1000; // The amount of time to delay nitrous activation on release of transbrake
 bool UseNitrousOnBrake = false; // allow nitrous to be active when transbrake is on or not
 byte LowVoltProtect = 11; // for low voltage protection to shut down nitrous system
 int RPMmin = 350; // Minimum RPM for nitrous activation divided by 10 RPM only needs to read in multiples of 10
 int RPMmax = 750; // Maximum RPM for nitrous activation divided by 10
 byte PPR = 4; // Pulses Per Revolution, typical distibutor applications 4 for 8 cyl, 3 for 6 cyl, and 2 for 4 cyl.
-
+byte RPMSmoothingFactor = 25; // 0-100: how much each new RPM reading counts vs the running average.
+                               // Lower = smoother but slower to react, higher = more responsive but jitterier. 100 = no smoothing.
+byte RPMHysteresis = 20; // Same /10 RPM units as RPMmin/RPMmax (default 20 = 200 actual RPM)
 
 //********** CONSTANTS **********//
 // Pin numbers now come from boards.h (pins_uno.h) rather than being
@@ -63,7 +66,7 @@ const byte NitrousRelay2 = PIN_RELAY2; // reserved for a future 2nd nitrous stag
 const byte ControllerStatusled = PIN_STATUS_LED;
 const unsigned long RPMTimeout = 500000UL; // 0.5 second
 const unsigned long TransBrakeDebounceDelay = 25; // milliseconds
-
+const unsigned long VoltageCheckInterval = 250; // milliseconds - no need to sample voltage every single loop
 
 //********** VARIABLES **********//
 //** For the LED's **//
@@ -97,6 +100,11 @@ unsigned long PreviousDelay1Millis;
 bool AllowNitrousSafetyTimeout = false;
 bool SafetyTimeoutActive = false;
 unsigned long PreviousSafetyTimeoutMillis;
+
+//** for Voltage **//
+bool AllowNitrousVoltage = true; // starts permissive; CheckVoltage() will correct this on the first sample
+float BatteryVoltage = 0;
+unsigned long PreviousVoltageMillis = 0;
 
 //** for RPM **//
 bool AllowNitrousRPM = false;
@@ -144,6 +152,12 @@ void setup() {
 #if defined(DEBUG)
   Serial.println("Nitrous system is armed!");
   Serial.println(BOARD_NAME);
+  if ((RPMmin + RPMHysteresis) >= (RPMmax - RPMHysteresis)) {
+    Serial.println("WARNING: RPMHysteresis leaves no valid RPM window - nitrous can never activate!");
+  }
+  if (ThrottleHysteresis >= ActivePercent) {
+    Serial.println("WARNING: ThrottleHysteresis >= ActivePercent - nitrous will only cut out via other conditions, never via throttle position.");
+  }
 #endif
 }
 
@@ -162,11 +176,11 @@ void loop() {
     NitrousDelay1();
   }
 
-  CheckVoltage(); //This really should not run every loop, 4 times a second at most would do.
+  CheckVoltage();
 
   CheckThrottle();
 
-  UpdateRPM(); // PATCH: compute RPM from ISR data here, outside the interrupt
+  UpdateRPM();
 
   CheckRPM();
 
@@ -271,17 +285,46 @@ void UpdateRPM() {
   interrupts();
 
   if (micros() - lastPulse > RPMTimeout) {
-    RPM = 0;
-  } else if (interval > 0) {
-    RPM = RPMPPR / interval;
+    RPM = 0; // stall detected - snap straight to 0, no smoothing delay here
+    return;
   }
+
+  if (interval == 0) {
+    return; // no new pulse data since last check
+  }
+
+  long rawRPM = RPMPPR / interval;
+
+  if (RPM > 0 && (rawRPM > RPM * 2 || rawRPM < RPM / 2)) {
+    return; // ignore this sample, keep the previous smoothed RPM
+  }
+
+  RPM = ((long)RPMSmoothingFactor * rawRPM + (100 - RPMSmoothingFactor) * RPM) / 100;
 }
 
+
 void CheckVoltage() {
-  // Stubbed out - LowVoltProtect is defined but not yet enforced.
-  // Future plan: read Voltpin, convert to actual battery voltage, and force
-  // AllowNitrousThrottle/AllowNitrousRPM false (or a dedicated
-  // AllowNitrousVoltage flag) if voltage drops below LowVoltProtect.
+  if (!UseLowVoltProtect) {
+    AllowNitrousVoltage = true; // protection disabled by the user - never inhibit on voltage
+    return;
+  }
+
+  unsigned long currentMillis = millis();
+  if (currentMillis - PreviousVoltageMillis < VoltageCheckInterval) {
+    return;
+  }
+  PreviousVoltageMillis = currentMillis;
+
+  BatteryVoltage = analogRead(Voltpin) * (ADC_REF_VOLTAGE / (float)ADC_MAX) * VOLTAGE_DIVIDER_RATIO;
+
+  AllowNitrousVoltage = (BatteryVoltage >= LowVoltProtect);
+
+#if defined(DEBUG)
+  if (!AllowNitrousVoltage) {
+    Serial.print("Low voltage inhibit: ");
+    Serial.println(BatteryVoltage);
+  }
+#endif
 }
 
 void CheckThrottle() {
@@ -289,10 +332,21 @@ void CheckThrottle() {
     case 0: //read throttle postion sensor pin and convert to a percentage of throttle opening
       ThrottleCurrentStatus = map(analogRead(Throttlepin), tpsMIN, tpsMAX, 0, 100);
 
-      if (ThrottleCurrentStatus >= ActivePercent) {
-        AllowNitrousThrottle = true;
-      } else {
-        AllowNitrousThrottle = false;
+      // int math + clamp avoids underflow if someone sets ThrottleHysteresis > ActivePercent
+      int throttleCutoff = (int)ActivePercent - (int)ThrottleHysteresis;
+      if (throttleCutoff < 0) throttleCutoff = 0;
+
+      switch (AllowNitrousThrottle) {
+        case false:
+          if (ThrottleCurrentStatus >= ActivePercent) {
+            AllowNitrousThrottle = true;
+          }
+          break;
+        case true:
+          if (ThrottleCurrentStatus < throttleCutoff) {
+            AllowNitrousThrottle = false;
+          }
+          break;
       }
       break;
     case 1:
@@ -309,12 +363,17 @@ void CheckThrottle() {
 void CheckRPM() {
   switch (NitrousActive) {
     case true:
+      // Cut off immediately at the original safety bounds - no hysteresis on
+      // the way out, this is the protective edge and shouldn't be delayed.
       if (RPM < RPMmin || RPM > RPMmax) {
         AllowNitrousRPM = false;
       }
       break;
     case false:
-      if (RPM > RPMmin && RPM < RPMmax) {
+      // To re-activate, require RPM to sit solidly inside the window - past
+      // RPMmin and short of RPMmax by RPMHysteresis - so hovering right at
+      // either boundary can't cause rapid on/off cycling.
+      if (RPM > (RPMmin + RPMHysteresis) && RPM < (RPMmax - RPMHysteresis)) {
         AllowNitrousRPM = true;
       } else {
         AllowNitrousRPM = false;
@@ -322,6 +381,7 @@ void CheckRPM() {
       break;
   }
 }
+
 
 void NitrousOnOff() {
   if (AllowNitrousThrottle == true && AllowNitrousTransBrake == true && AllowNitrousDelay1 == true && AllowNitrousRPM == true) {
@@ -344,6 +404,7 @@ void UpdateDisplay() {
     Serial.print("% ");
     Serial.print(RPM * 10);
     Serial.print(" ");
+    Serial.print(BatteryVoltage);    
     if (TransBrakeState == true) {
       Serial.print(" ");
       Serial.print("TransBrake On");

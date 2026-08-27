@@ -16,6 +16,9 @@
 #define PIN_STATUS_LED    13  // Controller status LED
 #define PIN_THROTTLE_TPS  A2  // Throttle position sensor, analog input
 #define PIN_THROTTLE_SW   16  // Throttle microswitch (Uno quirk: A2 doubles as digital pin 16)
+#define ADC_MAX           1023 // Uno's ADC is 10-bit: analogRead() returns 0-1023
+#define ADC_REF_VOLTAGE   5.0 // ADC_REF_VOLTAGE is the voltage the ADC measures against
+#define VOLTAGE_DIVIDER_RATIO 1.0 
 
 // ---- ADC ----
 // Uno's ADC is 10-bit: analogRead() returns 0-1023. Other boards (many STM32,
