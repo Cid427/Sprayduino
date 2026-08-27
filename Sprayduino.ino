@@ -52,6 +52,8 @@ const byte NitrousActiveled = 8; //LED to indicate nitrous is Active on digital 
 const byte NitrousRelay1 = 9; //Relay 1 connected to Digital 9. Nitrous relays on 9,10 for PWM if ever needed
 const byte NitrousRelay2 = 10; //Relay 2 connected to Digital 10, either as 2nd stage or together with relay 1
 const byte ControllerStatusled = 13; //LED to indicate the controller status on digital 13
+const unsigned long RPMTimeout = 500000UL; // 0.5 second
+const unsigned long TransBrakeDebounceDelay = 25; // milliseconds
 
 
 //********** VARIABLES **********//
@@ -71,6 +73,9 @@ bool AllowNitrousThrottle = false;
 bool AllowNitrousTransBrake = false;
 bool TransBrakeState = 0;
 bool LastTransBrakeState = 0;
+bool TransBrakeRawReading = HIGH;
+bool TransBrakeLastRawReading = HIGH;
+unsigned long TransBrakeLastChangeMillis = 0;
 
 bool NitrousActive = false;
 
@@ -174,8 +179,22 @@ void FlashControllerLED() {
   }
 }
 
+void DebounceTransBrake() {
+  bool reading = digitalRead(TransBrakepin);
+
+  if (reading != TransBrakeLastRawReading) {
+    TransBrakeLastChangeMillis = millis();
+  }
+
+  if ((millis() - TransBrakeLastChangeMillis) >= TransBrakeDebounceDelay) {
+    TransBrakeState = reading;
+  }
+
+  TransBrakeLastRawReading = reading;
+}
+
 void CheckTransBrake() {
-  TransBrakeState = digitalRead(TransBrakepin);
+  DebounceTransBrake();
 
   if (!Delay1Time) { // if there is no delay time
     if (TransBrakeState == HIGH && UseNitrousOnBrake == false) {
@@ -185,8 +204,7 @@ void CheckTransBrake() {
       AllowNitrousDelay1 = true;
     }
   } else { // if there is a delay
-    if (TransBrakeState == HIGH && UseNitrousOnBrake == false) { //this does'nt make sense if 'usenitrousonbrake is false then there would be no way to start the timer anyway
-      AllowNitrousTransBrake = false;
+    if (TransBrakeState == HIGH && UseNitrousOnBrake == false) {
     } else if (TransBrakeState != LastTransBrakeState) {
       if (TransBrakeState == LOW) {
         AllowNitrousTransBrake = true;
@@ -251,7 +269,7 @@ void CheckThrottle() {
   switch (ThrottleType) {
     case 0: //read throttle postion sensor pin and convert to a percentage of throttle opening
       ThrottleCurrentStatus = map(analogRead(Throttlepin), tpsMIN, tpsMAX, 0, 100);
-      if (ThrottleCurrentStatus > ActivePercent) {  //Allow Nitrous to be active only if above the set active percentage
+      if (ThrottleCurrentStatus => ActivePercent) {  //Allow Nitrous to be active only if above the set active percentage
         AllowNitrousThrottle = true;
       } else if (ThrottleCurrentStatus < ActivePercent) {
         AllowNitrousThrottle = false;
