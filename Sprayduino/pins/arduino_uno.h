@@ -2,7 +2,7 @@
 // Pin and platform definitions for Arduino Uno.
 // To port this project to a new board: copy this file, rename it
 // (e.g. pins_stm32.h), update the values below for the new board, then add
-// a branch for it in board_config.h.
+// a branch for it in boards.h.
 
 #define BOARD_NAME "Arduino Uno"
 
