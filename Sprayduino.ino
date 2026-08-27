@@ -86,10 +86,10 @@ unsigned long PreviousSafetyTimeoutMillis;
 
 //** for RPM **//
 bool AllowNitrousRPM = false;
-unsigned long LastPulseTime;
-unsigned long PulseInterval = 0;
+volatile unsigned long LastPulseTime;
+volatile unsigned long PulseInterval = 0;
+volatile long RPM = 0;
 long RPMPPR = 0;
-long RPM = 0;
 
 
 //********** SETUP **********//
@@ -199,6 +199,10 @@ void CheckTransBrake() {
         NitrousDelay1();
       }
     }
+    else if (TransBrakeState == HIGH && UseNitrousOnBrake == true && !AllowNitrousTransBrake) {
+      AllowNitrousTransBrake = true;
+      AllowNitrousDelay1 = true;
+    }    
     LastTransBrakeState = TransBrakeState;
   }
 }
@@ -219,9 +223,24 @@ void NitrousDelay1() {
 
 void GetRPM() {
   unsigned long PulseTime = micros();
-  PulseInterval = PulseTime - LastPulseTime;
-  LastPulseTime = PulseTime;
-  RPM = RPMPPR / PulseInterval;
+  unsigned long interval = PulseTime - LastPulseTime;
+  if (interval > 0) {
+    PulseInterval = interval;
+  }
+    LastPulseTime = PulseTime;
+}
+
+void UpdateRPM() {
+  noInterrupts();
+  unsigned long lastPulse = LastPulseTime;
+  unsigned long interval = PulseInterval;
+  interrupts();
+
+  if (micros() - lastPulse > RPMTimeout) {
+    RPM = 0;
+  } else if (interval > 0) {
+    RPM = RPMPPR / interval;
+  }
 }
 
 void CheckVoltage() {
@@ -249,6 +268,7 @@ void CheckThrottle() {
   }
 }
 
+
 void CheckRPM() {
   switch (NitrousActive) {
     case true:
@@ -259,6 +279,11 @@ void CheckRPM() {
     case false:
       if (RPM > RPMmin && RPM < RPMmax) {
         AllowNitrousRPM = true;
+      } else {
+        // PATCH: this else was missing, which let AllowNitrousRPM get stuck
+        // true after RPM left the window, since nothing ever reset it back
+        // to false while nitrous wasn't already active.
+        AllowNitrousRPM = false;
       }
       break;
   }
