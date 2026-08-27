@@ -1,8 +1,8 @@
 /*
-  Sprayduino Nitrous Controller - October 2015
+  Sprayduino Nitrous Controller - portable version
   Turns on or off nitrous control relay based on TPS position.
 
-  Reads voltage from Throttle Position Sensor on analog pin 2, or 
+  Reads voltage from Throttle Position Sensor on analog pin 2, or
   a microswitch on Digital pin 16(A2 used as digital).
   Read Trans Brake input on digital pin 7 to inhibit nitrous activation.
   Turns on or off nitrous activation relays on digital pin 9 and 10
@@ -13,19 +13,26 @@
     Add an arming input, remove the nitrous active led and use that pin. Add that led in hardware instead
     Nitrous relay safety timeout - shut off after n# seconds
     Menu system to make settings user configurable - will need an LCD and buttons,rotary,etc.
+      (LoadConfig/SaveConfig/CheckButtons are stubbed out below for this)
     Battery reference voltage -  low voltage shutoff.
     Low voltage warning LED
-    Debounce the transbrake input
     RPM Smoothing
+    Second nitrous stage on NitrousRelay2 (currently wired but unused)
+    Port to STM32 - add pins_stm32.h (see board_config.h)
 
-  Last modified Nov 21 2015
-  by Troy Bernakevitch
+  Original by Troy Bernakevitch, Nov 21 2015
+  Patched: bug fixes to RPM handling, transbrake edge case, throttle edge
+  case, dead config-detection code, and transbrake debounce (see "PATCH:"
+  comments). Then split into a board-portable layout: pin numbers and ADC
+  resolution now live in board_config.h / pins_uno.h instead of this file,
+  and EEPROM specifics are isolated in Settings.h. Porting to a new board
+  should never require editing this file - see board_config.h.
 */
 
-#include <EEPROM.h>
-#include <EEPROMAnything.h>
+#include "boards.h" // pin numbers, ADC_MAX, and storage capability for this board
+#include "Settings.h"     // SettingsLoad()/SettingsSave() - board-specific storage lives here
 
-#define VERSION " Sprayduino V0.3"
+#define VERSION " Sprayduino V0.5"
 #define DEBUG (1)
 
 
@@ -33,7 +40,7 @@
 // After Setup the user values stored in the EEPROM will override these defaults.
 
 int tpsMIN = 1; // TPS at closed throttle - future to be programmable
-int tpsMAX = 1023; // TPS at WOT - future to be programmable
+int tpsMAX = ADC_MAX; // TPS at WOT - future to be programmable. Was hardcoded 1023; now follows this board's ADC resolution.
 int ThrottleType = 0; // Type 0 for a TPS or 1 for microswtich.
 byte ActivePercent = 95; // percentage of throttle opening at which to activate nitrous
 unsigned long Delay1Time = 1000; // The amount of time to delay nitrous activation on release of transbrake
@@ -45,13 +52,15 @@ byte PPR = 4; // Pulses Per Revolution, typical distibutor applications 4 for 8 
 
 
 //********** CONSTANTS **********//
-const byte Voltpin = A4; //Input to monitor Battery Voltage on analog 4
-const byte RPMpin = 2; //Input for tachometer in on digital 2
-const byte TransBrakepin = 7; //Input for Transbrake connected to Digital 7
-const byte NitrousActiveled = 8; //LED to indicate nitrous is Active on digital 8
-const byte NitrousRelay1 = 9; //Relay 1 connected to Digital 9. Nitrous relays on 9,10 for PWM if ever needed
-const byte NitrousRelay2 = 10; //Relay 2 connected to Digital 10, either as 2nd stage or together with relay 1
-const byte ControllerStatusled = 13; //LED to indicate the controller status on digital 13
+// Pin numbers now come from boards.h (pins_uno.h) rather than being
+// hardcoded here, so this file doesn't need to change when porting boards.
+const byte Voltpin = PIN_VOLTAGE;
+const byte RPMpin = PIN_RPM;
+const byte TransBrakepin = PIN_TRANSBRAKE;
+const byte NitrousActiveled = PIN_NITROUS_LED;
+const byte NitrousRelay1 = PIN_RELAY1;
+const byte NitrousRelay2 = PIN_RELAY2; // reserved for a future 2nd nitrous stage - not driven yet
+const byte ControllerStatusled = PIN_STATUS_LED;
 const unsigned long RPMTimeout = 500000UL; // 0.5 second
 const unsigned long TransBrakeDebounceDelay = 25; // milliseconds
 
@@ -64,14 +73,14 @@ unsigned long previousled1Millis = 0;
 const long led1Interval = 1000;
 
 //** for TPS **//
-byte Throttlepin = A2; //Throttle Pin, default connected to Analog 2
+byte Throttlepin = PIN_THROTTLE_TPS; //Throttle Pin, default connected to the board's TPS pin
 int ThrottleCurrentStatus = 0;
 int ThrottleLastStatus = 0;
 bool AllowNitrousThrottle = false;
 
 //** for Trans Brake **//
 bool AllowNitrousTransBrake = false;
-bool TransBrakeState = 0;
+bool TransBrakeState = 0;         
 bool LastTransBrakeState = 0;
 bool TransBrakeRawReading = HIGH;
 bool TransBrakeLastRawReading = HIGH;
@@ -91,10 +100,10 @@ unsigned long PreviousSafetyTimeoutMillis;
 
 //** for RPM **//
 bool AllowNitrousRPM = false;
-volatile unsigned long LastPulseTime;
+volatile unsigned long LastPulseTime = 0;
 volatile unsigned long PulseInterval = 0;
+long RPMPPR = 0;       // set once in setup(), doesn't need volatile
 volatile long RPM = 0;
-long RPMPPR = 0;
 
 
 //********** SETUP **********//
@@ -109,9 +118,9 @@ void setup() {
 
   //Setup Pins
   switch (ThrottleType) {
-    case 0: Throttlepin = A2; // analog pin 2 for TPS
+    case 0: Throttlepin = PIN_THROTTLE_TPS; // TPS input
       break;
-    case 1: Throttlepin = 16; // use analog pin 2 as digital pin for microswitch
+    case 1: Throttlepin = PIN_THROTTLE_SW; // microswitch input
       break;
   }
   pinMode(Throttlepin, INPUT);
@@ -125,15 +134,16 @@ void setup() {
 
   //Turn OFF any power to the relay
   digitalWrite(NitrousRelay1, HIGH);
-  digitalWrite(NitrousRelay2, HIGH);
+  digitalWrite(NitrousRelay2, HIGH); // reserved for future 2nd stage, kept off
   digitalWrite(NitrousActiveled, LOW);
 
-  attachInterrupt(digitalPinToInterrupt(RPMpin), GetRPM, RISING); // Interrupt on digital pin 2 for RPM input
+  attachInterrupt(digitalPinToInterrupt(RPMpin), GetRPM, RISING); // Interrupt on the tach input pin
   RPMPPR = long(60e5 / PPR); // microseconds in a minute(60e6) / pulse per revolution. Using 60e5 to round down. ex. 7500RPM wil read 750.
 
   digitalWrite(ControllerStatusled, HIGH);
 #if defined(DEBUG)
   Serial.println("Nitrous system is armed!");
+  Serial.println(BOARD_NAME);
 #endif
 }
 
@@ -155,6 +165,8 @@ void loop() {
   CheckVoltage(); //This really should not run every loop, 4 times a second at most would do.
 
   CheckThrottle();
+
+  UpdateRPM(); // PATCH: compute RPM from ISR data here, outside the interrupt
 
   CheckRPM();
 
@@ -179,6 +191,7 @@ void FlashControllerLED() {
   }
 }
 
+
 void DebounceTransBrake() {
   bool reading = digitalRead(TransBrakepin);
 
@@ -194,7 +207,7 @@ void DebounceTransBrake() {
 }
 
 void CheckTransBrake() {
-  DebounceTransBrake();
+  DebounceTransBrake(); 
 
   if (!Delay1Time) { // if there is no delay time
     if (TransBrakeState == HIGH && UseNitrousOnBrake == false) {
@@ -205,6 +218,7 @@ void CheckTransBrake() {
     }
   } else { // if there is a delay
     if (TransBrakeState == HIGH && UseNitrousOnBrake == false) {
+      AllowNitrousTransBrake = false;
     } else if (TransBrakeState != LastTransBrakeState) {
       if (TransBrakeState == LOW) {
         AllowNitrousTransBrake = true;
@@ -220,7 +234,7 @@ void CheckTransBrake() {
     else if (TransBrakeState == HIGH && UseNitrousOnBrake == true && !AllowNitrousTransBrake) {
       AllowNitrousTransBrake = true;
       AllowNitrousDelay1 = true;
-    }    
+    }
     LastTransBrakeState = TransBrakeState;
   }
 }
@@ -239,14 +253,16 @@ void NitrousDelay1() {
   }
 }
 
+
 void GetRPM() {
   unsigned long PulseTime = micros();
   unsigned long interval = PulseTime - LastPulseTime;
   if (interval > 0) {
     PulseInterval = interval;
   }
-    LastPulseTime = PulseTime;
+  LastPulseTime = PulseTime;
 }
+
 
 void UpdateRPM() {
   noInterrupts();
@@ -262,16 +278,20 @@ void UpdateRPM() {
 }
 
 void CheckVoltage() {
-
+  // Stubbed out - LowVoltProtect is defined but not yet enforced.
+  // Future plan: read Voltpin, convert to actual battery voltage, and force
+  // AllowNitrousThrottle/AllowNitrousRPM false (or a dedicated
+  // AllowNitrousVoltage flag) if voltage drops below LowVoltProtect.
 }
 
 void CheckThrottle() {
   switch (ThrottleType) {
     case 0: //read throttle postion sensor pin and convert to a percentage of throttle opening
       ThrottleCurrentStatus = map(analogRead(Throttlepin), tpsMIN, tpsMAX, 0, 100);
-      if (ThrottleCurrentStatus => ActivePercent) {  //Allow Nitrous to be active only if above the set active percentage
+
+      if (ThrottleCurrentStatus >= ActivePercent) {
         AllowNitrousThrottle = true;
-      } else if (ThrottleCurrentStatus < ActivePercent) {
+      } else {
         AllowNitrousThrottle = false;
       }
       break;
@@ -286,7 +306,6 @@ void CheckThrottle() {
   }
 }
 
-
 void CheckRPM() {
   switch (NitrousActive) {
     case true:
@@ -298,9 +317,6 @@ void CheckRPM() {
       if (RPM > RPMmin && RPM < RPMmax) {
         AllowNitrousRPM = true;
       } else {
-        // PATCH: this else was missing, which let AllowNitrousRPM get stuck
-        // true after RPM left the window, since nothing ever reset it back
-        // to false while nitrous wasn't already active.
         AllowNitrousRPM = false;
       }
       break;
@@ -317,6 +333,8 @@ void NitrousOnOff() {
     digitalWrite(NitrousActiveled, LOW);
     NitrousActive = false;
   }
+  // NitrousRelay2 intentionally not driven here yet - reserved for a future
+  // second nitrous stage.
 }
 
 void UpdateDisplay() {
@@ -341,15 +359,22 @@ void UpdateDisplay() {
 }
 
 void CheckButtons() {
-
+  // Stubbed out - future plan: buttons/rotary encoder + LCD menu for
+  // configuring settings on-device instead of hardcoded defaults above.
 }
 
 void LoadConfig() {
-
+  SettingsLoad(); // board-specific storage lives in Settings.h
 }
 
 void CheckConfig() {
-  if (ThrottleType == 0 && tpsMIN == 0 && tpsMAX == 1023) { //if TPS has not been set assume either first run or config failed to load
+  // PATCH: original condition checked "tpsMIN == 0" to detect a failed/first
+  // config load, but the default value assigned to tpsMIN above is 1, not 0 -
+  // so that check could never be true and this safety check was dead code.
+  // Fixed to match the actual default, and now compares tpsMAX against
+  // ADC_MAX instead of a hardcoded 1023 so it stays correct on any board.
+  // Still a no-op in practice until SettingsLoad() actually reads from storage.
+  if (ThrottleType == 0 && tpsMIN == 1 && tpsMAX == ADC_MAX) {
 #if defined(DEBUG)
     Serial.println("Defaults loaded! Setup Needed!");
 #endif
@@ -359,6 +384,5 @@ void CheckConfig() {
 }
 
 void SaveConfig() {
-
+  SettingsSave(); // board-specific storage lives in Settings.h
 }
-
