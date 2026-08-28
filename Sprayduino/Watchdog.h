@@ -37,3 +37,5 @@
   void WatchdogDisable() {}
   void WatchdogEnable() {}
   void WatchdogPet() {}
+
+#endif
