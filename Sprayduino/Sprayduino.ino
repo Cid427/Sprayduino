@@ -19,6 +19,10 @@
     RPM Smoothing -done
     Second nitrous stage on NitrousRelay2 (currently wired but unused)
     Port to STM32 - add pins_stm32.h (see board_config.h)
+    Fuel pressure safety
+    Oil pressure safety
+    Master Arm/kill switch
+    Watchdog timer
 
   Original by Troy Bernakevitch, Nov 21 2015
   Patched: bug fixes to RPM handling, transbrake edge case, throttle edge
@@ -44,9 +48,13 @@ int tpsMAX = ADC_MAX; // TPS at WOT - future to be programmable. Was hardcoded 1
 int ThrottleType = 0; // Type 0 for a TPS or 1 for microswtich.
 byte ActivePercent = 95; // percentage of throttle opening at which to activate nitrous
 byte ThrottleHysteresis = 5; // percentage points below ActivePercent before nitrous cuts out.
+bool UseTransBrake = true; // whether a transbrake input is actually wired and used in this setup.
 unsigned long Delay1Time = 1000; // The amount of time to delay nitrous activation on release of transbrake
+bool UseDelay = true; // whether to require Delay1Time to elapse after brake release before nitrous is in use.
 bool UseNitrousOnBrake = false; // allow nitrous to be active when transbrake is on or not
-byte LowVoltProtect = 11; // for low voltage protection to shut down nitrous system
+bool SafetyTimeoutFromBrakeRelease = true; // true: safety timer starts counting when the transbrake releases.
+bool UseLowVoltProtect = true; // user-configurable: whether the low-voltage cutoff is enforced at all
+float LowVoltProtect = 11.0; // battery voltage below which nitrous is inhibited, only enforced if UseLowVoltProtect is true
 int RPMmin = 350; // Minimum RPM for nitrous activation divided by 10 RPM only needs to read in multiples of 10
 int RPMmax = 750; // Maximum RPM for nitrous activation divided by 10
 byte PPR = 4; // Pulses Per Revolution, typical distibutor applications 4 for 8 cyl, 3 for 6 cyl, and 2 for 4 cyl.
@@ -116,6 +124,18 @@ volatile long RPM = 0;
 
 //********** SETUP **********//
 
+void EnforceSettingDependencies() {
+  // If there's no transbrake, there's no release event to time the safety
+  // timeout from - force it to start from first activation instead, so the
+  // feature keeps working rather than silently going dead.
+  // NOTE: once the settings menu (buttons/screen) exists, call this again
+  // any time UseTransBrake is changed at runtime, not just here at boot -
+  // this only runs once, at startup.
+  if (!UseTransBrake) {
+    SafetyTimeoutFromBrakeRelease = false;
+  }
+}
+
 void setup() {
 
   Serial.begin(9600);
@@ -123,6 +143,8 @@ void setup() {
   LoadConfig();
 
   CheckConfig();
+
+  EnforceSettingDependencies();
 
   //Setup Pins
   switch (ThrottleType) {
@@ -149,6 +171,7 @@ void setup() {
   RPMPPR = long(60e5 / PPR); // microseconds in a minute(60e6) / pulse per revolution. Using 60e5 to round down. ex. 7500RPM wil read 750.
 
   digitalWrite(ControllerStatusled, HIGH);
+
 #if defined(DEBUG)
   Serial.println("Nitrous system is armed!");
   Serial.println(BOARD_NAME);
@@ -157,6 +180,12 @@ void setup() {
   }
   if (ThrottleHysteresis >= ActivePercent) {
     Serial.println("WARNING: ThrottleHysteresis >= ActivePercent - nitrous will only cut out via other conditions, never via throttle position.");
+  }
+  if (!UseTransBrake && SafetyTimeoutFromBrakeRelease) {
+    // Should never actually print - EnforceSettingDependencies() corrects this
+    // combination above. Left as a backstop in case that ever gets bypassed
+    // (e.g. a future settings-menu bug, or a value poked in some other way).
+    Serial.println("WARNING: UseTransBrake is false but SafetyTimeoutFromBrakeRelease is true - there's no release event, so the safety timer will never start. Set SafetyTimeoutFromBrakeRelease to false.");
   }
 #endif
 }
@@ -183,6 +212,8 @@ void loop() {
   UpdateRPM();
 
   CheckRPM();
+
+  CheckSafetyTimeout();
 
   NitrousOnOff();
 
@@ -221,35 +252,62 @@ void DebounceTransBrake() {
 }
 
 void CheckTransBrake() {
-  DebounceTransBrake(); 
+  if (!UseTransBrake) {
+    // No transbrake in this setup - never gates nitrous, and there's no
+    // release event for other features to hook into (see the startup
+    // warning if SafetyTimeoutFromBrakeRelease is left true with this off).
+    AllowNitrousTransBrake = true;
+    AllowNitrousDelay1 = true;
+    return;
+  }
 
-  if (!Delay1Time) { // if there is no delay time
-    if (TransBrakeState == HIGH && UseNitrousOnBrake == false) {
-      AllowNitrousTransBrake = false;
-    } else  {
-      AllowNitrousTransBrake = true;
-      AllowNitrousDelay1 = true;
-    }
-  } else { // if there is a delay
-    if (TransBrakeState == HIGH && UseNitrousOnBrake == false) {
-      AllowNitrousTransBrake = false;
-    } else if (TransBrakeState != LastTransBrakeState) {
-      if (TransBrakeState == LOW) {
-        AllowNitrousTransBrake = true;
-        NitrousDelay1Active = true;
+  DebounceTransBrake();
+
+  // Gate nitrous while the brake is actively held, unless nitrous-on-brake
+  // is explicitly allowed. Re-evaluated every loop, not just on transitions.
+  AllowNitrousTransBrake = !(TransBrakeState == HIGH && UseNitrousOnBrake == false);
+
+  // Detect the release/reapply edges exactly once per transition - this is
+  // also where the post-release delay and the safety timeout hook in, and it
+  // now runs the same way regardless of whether UseDelay is on, so neither
+  // feature silently stops working depending on Delay1Time's value.
+  if (TransBrakeState != LastTransBrakeState) {
+    if (TransBrakeState == LOW) {
 #if defined(DEBUG)
-        Serial.println("TransBrake Released");
+      Serial.println("TransBrake Released");
+#endif
+      if (UseDelay) {
+        NitrousDelay1Active = true;
+        PreviousDelay1Millis = millis();
+#if defined(DEBUG)
         Serial.println("Delay Started");
 #endif
-        PreviousDelay1Millis = millis();
-        NitrousDelay1();
+        NitrousDelay1(); // will set AllowNitrousDelay1 false immediately, true once Delay1Time elapses
+      } else {
+        AllowNitrousDelay1 = true; // no post-release delay configured - allow right away
+      }
+
+      if (SafetyTimeoutFromBrakeRelease) {
+        SafetyTimeoutActive = true;
+        PreviousSafetyTimeoutMillis = millis();
+      }
+    } else {
+      // Reapplied (re-staged) - re-arm the safety timeout for the next run,
+      // and require a fresh release (+ delay, if used) before the next one.
+      AllowNitrousSafetyTimeout = true;
+      SafetyTimeoutActive = false;
+      if (!UseNitrousOnBrake) {
+        AllowNitrousDelay1 = false;
       }
     }
-    else if (TransBrakeState == HIGH && UseNitrousOnBrake == true && !AllowNitrousTransBrake) {
-      AllowNitrousTransBrake = true;
-      AllowNitrousDelay1 = true;
-    }
     LastTransBrakeState = TransBrakeState;
+  }
+
+  // Power-on edge case: if UseNitrousOnBrake is true and the brake is
+  // already held at boot, there's no release transition to catch - permit
+  // directly instead of waiting forever for an edge that will never come.
+  if (TransBrakeState == HIGH && UseNitrousOnBrake == true && !AllowNitrousDelay1) {
+    AllowNitrousDelay1 = true;
   }
 }
 
@@ -300,6 +358,17 @@ void UpdateRPM() {
   }
 
   RPM = ((long)RPMSmoothingFactor * rawRPM + (100 - RPMSmoothingFactor) * RPM) / 100;
+}
+
+
+void CheckSafetyTimeout() {
+  if (SafetyTimeoutActive && (millis() - PreviousSafetyTimeoutMillis >= SafetyTimeoutDuration)) {
+    AllowNitrousSafetyTimeout = false; // tripped - stays latched off until the transbrake is reapplied
+    SafetyTimeoutActive = false;       // stop counting, the trip itself is now what's holding nitrous off
+#if defined(DEBUG)
+    Serial.println("Safety timeout reached - nitrous cut off");
+#endif
+  }
 }
 
 
@@ -384,7 +453,13 @@ void CheckRPM() {
 
 
 void NitrousOnOff() {
-  if (AllowNitrousThrottle == true && AllowNitrousTransBrake == true && AllowNitrousDelay1 == true && AllowNitrousRPM == true) {
+  if (AllowNitrousThrottle == true && AllowNitrousTransBrake == true && AllowNitrousDelay1 == true && AllowNitrousRPM == true && AllowNitrousVoltage == true && AllowNitrousSafetyTimeout == true) {
+    if (!NitrousActive && !SafetyTimeoutFromBrakeRelease && !SafetyTimeoutActive) {
+      // First activation this run, and configured to start the safety
+      // timeout clock here instead of at brake release.
+      SafetyTimeoutActive = true;
+      PreviousSafetyTimeoutMillis = millis();
+    }
     digitalWrite(NitrousRelay1, LOW);
     digitalWrite(NitrousActiveled, HIGH);
     NitrousActive = true;
@@ -396,6 +471,7 @@ void NitrousOnOff() {
   // NitrousRelay2 intentionally not driven here yet - reserved for a future
   // second nitrous stage.
 }
+
 
 void UpdateDisplay() {
 #if defined(DEBUG)
