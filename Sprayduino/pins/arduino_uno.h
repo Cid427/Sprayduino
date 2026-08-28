@@ -20,12 +20,6 @@
 #define ADC_REF_VOLTAGE   5.0 // ADC_REF_VOLTAGE is the voltage the ADC measures against
 #define VOLTAGE_DIVIDER_RATIO 1.0 
 
-// ---- ADC ----
-// Uno's ADC is 10-bit: analogRead() returns 0-1023. Other boards (many STM32,
-// ESP32) default to 12-bit (0-4095) - always read this constant instead of
-// assuming 1023 anywhere in the core logic.
-#define ADC_MAX 1023
-
 // ---- Persistent storage ----
 // Uno has real onboard EEPROM. Boards without native EEPROM (most STM32)
 // should leave this undefined and implement flash-based storage in
