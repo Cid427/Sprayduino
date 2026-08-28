@@ -53,6 +53,7 @@ unsigned long Delay1Time = 1000; // The amount of time to delay nitrous activati
 bool UseDelay = true; // whether to require Delay1Time to elapse after brake release before nitrous is in use.
 bool UseNitrousOnBrake = false; // allow nitrous to be active when transbrake is on or not
 bool SafetyTimeoutFromBrakeRelease = true; // true: safety timer starts counting when the transbrake releases.
+unsigned long SafetyTimeoutDuration = 10000; // milliseconds nitrous may stay continuously active before being activated
 bool UseLowVoltProtect = true; // user-configurable: whether the low-voltage cutoff is enforced at all
 float LowVoltProtect = 11.0; // battery voltage below which nitrous is inhibited, only enforced if UseLowVoltProtect is true
 int RPMmin = 350; // Minimum RPM for nitrous activation divided by 10 RPM only needs to read in multiples of 10
