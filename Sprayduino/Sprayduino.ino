@@ -35,6 +35,7 @@
 
 #include "boards.h"       // pin numbers, ADC_MAX, and storage capability for this board
 #include "Settings.h"     // SettingsLoad()/SettingsSave() - board-specific storage lives here
+#include "Watchdog.h"     // WatchdogEnable()/WatchdogPet()/WatchdogDisable() - board-specific watchdog lives here
 
 #define VERSION " Sprayduino V0.6"
 #define DEBUG (1)
@@ -139,6 +140,8 @@ void EnforceSettingDependencies() {
 
 void setup() {
 
+  WatchdogDisable();
+
   Serial.begin(9600);
 
   LoadConfig();
@@ -189,12 +192,16 @@ void setup() {
     Serial.println("WARNING: UseTransBrake is false but SafetyTimeoutFromBrakeRelease is true - there's no release event, so the safety timer will never start. Set SafetyTimeoutFromBrakeRelease to false.");
   }
 #endif
+
+  WatchdogEnable();
 }
 
 
 //********** MAIN LOOP **********//
 
 void loop() {
+
+  WatchdogPet(); // must run every iteration - see Watchdog.h
 
   if (FlashLED1 == true) {
     FlashControllerLED();
