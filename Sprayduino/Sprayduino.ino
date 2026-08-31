@@ -33,9 +33,10 @@
   should never require editing this file - see board_config.h.
 */
 
-#include "boards.h"       // pin numbers, ADC_MAX, and storage capability for this board
+#include "Boards.h"       // pin numbers, ADC_MAX, and storage capability for this board
 #include "Settings.h"     // SettingsLoad()/SettingsSave() - board-specific storage lives here
 #include "Watchdog.h"     // WatchdogEnable()/WatchdogPet()/WatchdogDisable() - board-specific watchdog lives here
+#include "Sensors.h"      // ReadFuelPressurePSI()/ReadOilPressurePSI() - sensor-specific conversion math lives here
 
 #define VERSION " Sprayduino V0.6"
 #define DEBUG (1)
@@ -57,12 +58,21 @@ bool SafetyTimeoutFromBrakeRelease = true; // true: safety timer starts counting
 unsigned long SafetyTimeoutDuration = 10000; // milliseconds nitrous may stay continuously active before being activated
 bool UseLowVoltProtect = true; // user-configurable: whether the low-voltage cutoff is enforced at all
 float LowVoltProtect = 11.0; // battery voltage below which nitrous is inhibited, only enforced if UseLowVoltProtect is true
+unsigned long LowVoltTimeoutMS = 500; // how long voltage may stay below LowVoltProtect before nitrous cut
 int RPMmin = 350; // Minimum RPM for nitrous activation divided by 10 RPM only needs to read in multiples of 10
 int RPMmax = 750; // Maximum RPM for nitrous activation divided by 10
 byte PPR = 4; // Pulses Per Revolution, typical distibutor applications 4 for 8 cyl, 3 for 6 cyl, and 2 for 4 cyl.
 byte RPMSmoothingFactor = 25; // 0-100: how much each new RPM reading counts vs the running average.
                                // Lower = smoother but slower to react, higher = more responsive but jitterier. 100 = no smoothing.
 byte RPMHysteresis = 20; // Same /10 RPM units as RPMmin/RPMmax (default 20 = 200 actual RPM)
+bool UseFuelPressureCutoff = false; // whether to enforce a minimum fuel pressure at all
+float FuelPressureMinPSI = 4.0; // set to your fuel system's actual minimum safe pressure
+unsigned long FuelPressureTimeoutMS = 500; // how long pressure may stay below FuelPressureMinPSI before nitrous cuts
+bool UseOilPressureCutoff = false; // whether to enforce a minimum oil pressure at all
+float OilPressureMinPSI = 20.0; // PLACEHOLDER - set to your engine's actual minimum safe hot oil pressure
+unsigned long OilPressureTimeoutMS = 500; // same idea as FuelPressureTimeoutMS, for oil pressure
+
+
 
 //********** CONSTANTS **********//
 // Pin numbers now come from boards.h (pins_uno.h) rather than being
@@ -90,6 +100,12 @@ byte Throttlepin = PIN_THROTTLE_TPS; //Throttle Pin, default connected to the bo
 int ThrottleCurrentStatus = 0;
 int ThrottleLastStatus = 0;
 bool AllowNitrousThrottle = false;
+// Only used when ThrottleType is 1 (microswitch) - rest state (LOW) assumes
+// the switch is open at closed throttle, matching the existing
+// digitalRead(Throttlepin) == HIGH check in CheckThrottle().
+bool ThrottleSwitchLastRawReading = LOW;
+unsigned long ThrottleSwitchLastChangeMillis = 0;
+bool ThrottleSwitchDebouncedState = false;
 
 //** for Trans Brake **//
 bool AllowNitrousTransBrake = false;
@@ -115,6 +131,14 @@ unsigned long PreviousSafetyTimeoutMillis;
 bool AllowNitrousVoltage = true; // starts permissive; CheckVoltage() will correct this on the first sample
 float BatteryVoltage = 0;
 unsigned long PreviousVoltageMillis = 0;
+bool VoltageBelowMin = false;
+unsigned long VoltageBelowMinSinceMillis = 0;
+
+//** for Fuel/Oil Pressure **//
+bool AllowNitrousFuelPressure = true;
+float FuelPressurePSI = 0;
+bool FuelPressureBelowMin = false;
+unsigned long FuelPressureBelowMinSinceMillis = 0;
 
 //** for RPM **//
 bool AllowNitrousRPM = false;
@@ -169,6 +193,7 @@ void setup() {
   //Turn OFF any power to the relay
   digitalWrite(NitrousRelay1, HIGH);
   digitalWrite(NitrousRelay2, HIGH); // reserved for future 2nd stage, kept off
+  digitalWrite(NitrousRelay3, HIGH); // reserved for future 3rd stage, kept off
   digitalWrite(NitrousActiveled, LOW);
 
   attachInterrupt(digitalPinToInterrupt(RPMpin), GetRPM, RISING); // Interrupt on the tach input pin
@@ -214,6 +239,12 @@ void loop() {
   }
 
   CheckVoltage();
+
+  ReadPressureSensors();
+
+  CheckFuelPressure();
+
+  CheckOilPressure();
 
   CheckThrottle();
 
@@ -379,27 +410,91 @@ void CheckSafetyTimeout() {
   }
 }
 
+// Shared by voltage, fuel pressure, and oil pressure: allows a value to dip
+// below minValue for up to timeoutMS before reporting unsafe, but reports
+// safe again the instant it recovers - no equivalent grace period on the way
+// back up, since there's no reason to stay cautious once it's actually fine.
+bool CheckMinThreshold(float currentValue, float minValue, unsigned long timeoutMS, bool &belowMin, unsigned long &belowMinSinceMillis) {
+  if (currentValue < minValue) {
+    if (!belowMin) {
+      belowMin = true;
+      belowMinSinceMillis = millis();
+    }
+    if (millis() - belowMinSinceMillis >= timeoutMS) {
+      return false; // sustained below minimum - cut nitrous
+    }
+    return true; // still within the grace period
+  }
+
+  belowMin = false; // recovered - clear immediately, no delay on the way back up
+  return true;
+}
+
 
 void CheckVoltage() {
   if (!UseLowVoltProtect) {
     AllowNitrousVoltage = true; // protection disabled by the user - never inhibit on voltage
+    VoltageBelowMin = false;
     return;
   }
 
+  // Only sample a few times a second (per VoltageCheckInterval) rather than
+  // every loop - battery voltage doesn't change fast enough to need more,
+  // and it keeps the ADC free for other reads.
   unsigned long currentMillis = millis();
   if (currentMillis - PreviousVoltageMillis < VoltageCheckInterval) {
     return;
   }
   PreviousVoltageMillis = currentMillis;
 
+  // Board-agnostic conversion: ADC_REF_VOLTAGE, ADC_MAX, and
+  // VOLTAGE_DIVIDER_RATIO all come from boards.h, so this line doesn't
+  // change when porting to a board with a different ADC or reference voltage.
   BatteryVoltage = analogRead(Voltpin) * (ADC_REF_VOLTAGE / (float)ADC_MAX) * VOLTAGE_DIVIDER_RATIO;
 
-  AllowNitrousVoltage = (BatteryVoltage >= LowVoltProtect);
+  bool wasAllowed = AllowNitrousVoltage;
+  AllowNitrousVoltage = CheckMinThreshold(BatteryVoltage, LowVoltProtect, LowVoltTimeoutMS, VoltageBelowMin, VoltageBelowMinSinceMillis);
 
 #if defined(DEBUG)
-  if (!AllowNitrousVoltage) {
+  if (wasAllowed && !AllowNitrousVoltage) {
     Serial.print("Low voltage inhibit: ");
     Serial.println(BatteryVoltage);
+  }
+#endif
+}
+
+void ReadPressureSensors() {
+  // Conversion math lives in Sensors.h, not here - see that file to fill in
+  // the actual sensor-specific formulas once sensors are chosen.
+  FuelPressurePSI = ReadFuelPressurePSI();
+  OilPressurePSI = ReadOilPressurePSI();
+}
+void CheckFuelPressure() {
+  if (!UseFuelPressureCutoff) {
+    AllowNitrousFuelPressure = true;
+    return;
+  }
+  bool wasAllowed = AllowNitrousFuelPressure;
+  AllowNitrousFuelPressure = CheckMinThreshold(FuelPressurePSI, FuelPressureMinPSI, FuelPressureTimeoutMS, FuelPressureBelowMin, FuelPressureBelowMinSinceMillis);
+#if defined(DEBUG)
+  if (wasAllowed && !AllowNitrousFuelPressure) {
+    Serial.print("Fuel pressure inhibit: ");
+    Serial.println(FuelPressurePSI);
+  }
+#endif
+}
+
+void CheckOilPressure() {
+  if (!UseOilPressureCutoff) {
+    AllowNitrousOilPressure = true;
+    return;
+  }
+  bool wasAllowed = AllowNitrousOilPressure;
+  AllowNitrousOilPressure = CheckMinThreshold(OilPressurePSI, OilPressureMinPSI, OilPressureTimeoutMS, OilPressureBelowMin, OilPressureBelowMinSinceMillis);
+#if defined(DEBUG)
+  if (wasAllowed && !AllowNitrousOilPressure) {
+    Serial.print("Oil pressure inhibit: ");
+    Serial.println(OilPressurePSI);
   }
 #endif
 }
@@ -427,12 +522,9 @@ void CheckThrottle() {
       }
       break;
     case 1:
-      ThrottleCurrentStatus = digitalRead(Throttlepin);
-      if (ThrottleCurrentStatus == HIGH) {
-        AllowNitrousThrottle = true;
-      } else {
-        AllowNitrousThrottle = false;
-      }
+      DebouncePin(Throttlepin, ThrottleSwitchDebounceDelay, ThrottleSwitchLastRawReading, ThrottleSwitchLastChangeMillis, ThrottleSwitchDebouncedState);
+      ThrottleCurrentStatus = ThrottleSwitchDebouncedState ? HIGH : LOW;
+      AllowNitrousThrottle = ThrottleSwitchDebouncedState;
       break;
   }
 }
@@ -461,7 +553,7 @@ void CheckRPM() {
 
 
 void NitrousOnOff() {
-  if (AllowNitrousThrottle == true && AllowNitrousTransBrake == true && AllowNitrousDelay1 == true && AllowNitrousRPM == true && AllowNitrousVoltage == true && AllowNitrousSafetyTimeout == true) {
+  if (AllowNitrousThrottle == true && AllowNitrousTransBrake == true && AllowNitrousDelay1 == true && AllowNitrousRPM == true && AllowNitrousVoltage == true && AllowNitrousSafetyTimeout == true && AllowNitrousFuelPressure == true && AllowNitrousOilPressure == true) {
     if (!NitrousActive && !SafetyTimeoutFromBrakeRelease && !SafetyTimeoutActive) {
       // First activation this run, and configured to start the safety
       // timeout clock here instead of at brake release.
@@ -476,8 +568,10 @@ void NitrousOnOff() {
     digitalWrite(NitrousActiveled, LOW);
     NitrousActive = false;
   }
-  // NitrousRelay2 intentionally not driven here yet - reserved for a future
-  // second nitrous stage.
+  // NitrousRelay2 and NitrousRelay3 intentionally not driven here yet -
+  // reserved for future 2nd/3rd nitrous stages. Both are on PWM-capable
+  // pins already, ready for progressive/duty-cycle control if that's ever
+  // added - see pins/arduino_uno.h.
 }
 
 

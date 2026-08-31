@@ -9,7 +9,7 @@
 //   2. Add a new #elif branch below that includes it.
 
 #if defined(ARDUINO_AVR_UNO)
-  #include "pins/arduino_uno.h"
+  #include "Pins/Arduino_uno.h"
 #elif defined(ARDUINO_AVR_MEGA2560)
   #error "No pins_mega.h yet - copy pins_uno.h, adjust it for the Mega, and include it here"
 #elif defined(ARDUINO_ARCH_STM32)

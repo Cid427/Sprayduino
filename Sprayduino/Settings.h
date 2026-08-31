@@ -1,5 +1,5 @@
 #pragma once
-#include "boards.h"
+#include "Boards.h"
 
 // Thin wrapper around whatever persistent storage this board has. The core
 // logic only ever calls SettingsLoad()/SettingsSave() - it never touches
