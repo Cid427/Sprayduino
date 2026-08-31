@@ -194,7 +194,7 @@ void setup() {
   pinMode(TransBrakepin, INPUT);
   pinMode(NitrousRelay1, OUTPUT);
   pinMode(NitrousRelay2, OUTPUT);
-  pinmode(NitrousRelay3, OUTPUT);
+  pinMode(NitrousRelay3, OUTPUT);
   pinMode(NitrousActiveled, OUTPUT);
   pinMode(ControllerStatusled, OUTPUT);
 
