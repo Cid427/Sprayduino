@@ -13,13 +13,20 @@
 #define PIN_NITROUS_LED   8   // Nitrous-active indicator LED
 #define PIN_RELAY1        9   // Nitrous stage 1 relay - PWM-capable
 #define PIN_RELAY2        10  // Nitrous stage 2 relay (reserved, unused for now) - PWM-capable
-#define PIN_RELAY3        11  // Nitrous stage 3 relay (reserved, unused for now) - PWM-capable
-#define PIN_STATUS_LED    13  // Controller status LED
+#define PIN_RELAY3        6  // Nitrous stage 3 relay (reserved, unused for now) - PWM-capable
+#define PIN_STATUS_LED    5  // Controller status LED
 #define PIN_THROTTLE_TPS  A2  // Throttle position sensor, analog input
 #define PIN_THROTTLE_SW   16  // Throttle microswitch (Uno quirk: A2 doubles as digital pin 16)
 #define PIN_FUEL_PRESSURE A0  // Reserved for a future fuel pressure sensor - not yet wired
 #define PIN_OIL_PRESSURE  A1  // Reserved for a future oil pressure sensor - not yet wired
  
+// ---- Reserved for a future MCP2515 CAN module (not implemented yet) ----
+#define PIN_CAN_MOSI      11  // Fixed hardware SPI pin - do not reassign to anything else
+#define PIN_CAN_MISO      12  // Fixed hardware SPI pin - do not reassign to anything else
+#define PIN_CAN_SCK       13  // Fixed hardware SPI pin - do not reassign to anything else
+#define PIN_CAN_CS        4   // MCP2515 chip-select - any free digital pin works, this one's arbitrary
+#define PIN_CAN_INT       3   // MCP2515 interrupt output - reserved on Uno's other external-interrupt-capable pin (besides 2, used by RPM)
+
 // ---- ADC ----
 // Uno's ADC is 10-bit: analogRead() returns 0-1023. Other boards (many STM32,
 // ESP32) default to 12-bit (0-4095) - always read this constant instead of

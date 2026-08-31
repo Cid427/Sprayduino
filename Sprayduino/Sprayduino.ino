@@ -66,9 +66,11 @@ byte RPMSmoothingFactor = 25; // 0-100: how much each new RPM reading counts vs 
                                // Lower = smoother but slower to react, higher = more responsive but jitterier. 100 = no smoothing.
 byte RPMHysteresis = 20; // Same /10 RPM units as RPMmin/RPMmax (default 20 = 200 actual RPM)
 bool UseFuelPressureCutoff = false; // whether to enforce a minimum fuel pressure at all
+bool FuelPressureIsSwitch = false; // false = analog sensor(ReadFuelPressurePSI()) true for pressure switch
 float FuelPressureMinPSI = 4.0; // set to your fuel system's actual minimum safe pressure
 unsigned long FuelPressureTimeoutMS = 500; // how long pressure may stay below FuelPressureMinPSI before nitrous cuts
 bool UseOilPressureCutoff = false; // whether to enforce a minimum oil pressure at all
+bool OilPressureIsSwitch = false; // same idea as FuelPressureIsSwitch, for oil pressure
 float OilPressureMinPSI = 20.0; // PLACEHOLDER - set to your engine's actual minimum safe hot oil pressure
 unsigned long OilPressureTimeoutMS = 500; // same idea as FuelPressureTimeoutMS, for oil pressure
 
@@ -192,6 +194,12 @@ void setup() {
   pinMode(Voltpin, INPUT);
   pinMode(RPMpin, INPUT);
   pinMode(TransBrakepin, INPUT);
+    if (FuelPressureIsSwitch) {
+    pinMode(PIN_FUEL_PRESSURE, INPUT_PULLUP);
+  }
+  if (OilPressureIsSwitch) {
+    pinMode(PIN_OIL_PRESSURE, INPUT_PULLUP);
+  }
   pinMode(NitrousRelay1, OUTPUT);
   pinMode(NitrousRelay2, OUTPUT);
   pinMode(NitrousRelay3, OUTPUT);
@@ -482,10 +490,12 @@ void CheckVoltage() {
 
 void ReadPressureSensors() {
   // Conversion math lives in Sensors.h, not here - see that file to fill in
-  // the actual sensor-specific formulas once sensors are chosen.
-  FuelPressurePSI = ReadFuelPressurePSI();
-  OilPressurePSI = ReadOilPressurePSI();
+  // the actual sensor-specific formulas once sensors are chosen, or to
+  // adjust the switch polarity assumption if using a pressure switch instead.
+  FuelPressurePSI = FuelPressureIsSwitch ? ReadFuelPressureSwitchPSI() : ReadFuelPressurePSI();
+  OilPressurePSI = OilPressureIsSwitch ? ReadOilPressureSwitchPSI() : ReadOilPressurePSI();
 }
+
 void CheckFuelPressure() {
   if (!UseFuelPressureCutoff) {
     AllowNitrousFuelPressure = true;

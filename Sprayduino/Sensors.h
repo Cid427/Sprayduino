@@ -32,3 +32,10 @@ float ReadOilPressurePSI() {
   return 0;
 }
  
+float ReadFuelPressureSwitchPSI() {
+  return (digitalRead(PIN_FUEL_PRESSURE) == LOW) ? 999.0 : 0.0;
+}
+ 
+float ReadOilPressureSwitchPSI() {
+  return (digitalRead(PIN_OIL_PRESSURE) == LOW) ? 999.0 : 0.0;
+}
