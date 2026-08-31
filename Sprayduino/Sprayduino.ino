@@ -83,9 +83,11 @@ const byte TransBrakepin = PIN_TRANSBRAKE;
 const byte NitrousActiveled = PIN_NITROUS_LED;
 const byte NitrousRelay1 = PIN_RELAY1;
 const byte NitrousRelay2 = PIN_RELAY2; // reserved for a future 2nd nitrous stage - not driven yet
+const byte NitrousRelay3 = PIN_RELAY3; // reserved for a future 3rd nitrous stage - not driven yet
 const byte ControllerStatusled = PIN_STATUS_LED;
 const unsigned long RPMTimeout = 500000UL; // 0.5 second
 const unsigned long TransBrakeDebounceDelay = 25; // milliseconds
+const unsigned long ThrottleSwitchDebounceDelay = 25; // milliseconds - only used when ThrottleType is 1 (microswitch
 const unsigned long VoltageCheckInterval = 250; // milliseconds - no need to sample voltage every single loop
 
 //********** VARIABLES **********//
@@ -140,6 +142,11 @@ float FuelPressurePSI = 0;
 bool FuelPressureBelowMin = false;
 unsigned long FuelPressureBelowMinSinceMillis = 0;
 
+bool AllowNitrousOilPressure = true;
+float OilPressurePSI = 0;
+bool OilPressureBelowMin = false;
+unsigned long OilPressureBelowMinSinceMillis = 0;
+
 //** for RPM **//
 bool AllowNitrousRPM = false;
 volatile unsigned long LastPulseTime = 0;
@@ -187,6 +194,7 @@ void setup() {
   pinMode(TransBrakepin, INPUT);
   pinMode(NitrousRelay1, OUTPUT);
   pinMode(NitrousRelay2, OUTPUT);
+  pinmode(NitrousRelay3, OUTPUT);
   pinMode(NitrousActiveled, OUTPUT);
   pinMode(ControllerStatusled, OUTPUT);
 
@@ -275,20 +283,29 @@ void FlashControllerLED() {
   }
 }
 
+// Generic switch debounce, reused for the transbrake and the throttle
+// microswitch (and any future digital switch input). Only updates
+// debouncedState once the raw pin reading has held steady for debounceDelay
+// milliseconds, filtering out mechanical/electrical bounce rather than
+// reacting to every raw transition.
+void DebouncePin(byte pin, unsigned long debounceDelay, bool &lastRawReading, unsigned long &lastChangeMillis, bool &debouncedState) {
+  bool reading = digitalRead(pin);
+
+  if (reading != lastRawReading) {
+    lastChangeMillis = millis();
+  }
+
+  if ((millis() - lastChangeMillis) >= debounceDelay) {
+    debouncedState = reading;
+  }
+
+  lastRawReading = reading;
+}
 
 void DebounceTransBrake() {
-  bool reading = digitalRead(TransBrakepin);
-
-  if (reading != TransBrakeLastRawReading) {
-    TransBrakeLastChangeMillis = millis();
-  }
-
-  if ((millis() - TransBrakeLastChangeMillis) >= TransBrakeDebounceDelay) {
-    TransBrakeState = reading;
-  }
-
-  TransBrakeLastRawReading = reading;
+  DebouncePin(TransBrakepin, TransBrakeDebounceDelay, TransBrakeLastRawReading, TransBrakeLastChangeMillis, TransBrakeState);
 }
+
 
 void CheckTransBrake() {
   if (!UseTransBrake) {
