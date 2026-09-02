@@ -75,7 +75,6 @@ float OilPressureMinPSI = 20.0; // PLACEHOLDER - set to your engine's actual min
 unsigned long OilPressureTimeoutMS = 500; // same idea as FuelPressureTimeoutMS, for oil pressure
 
 
-
 //********** CONSTANTS **********//
 // Pin numbers now come from boards.h (pins_uno.h) rather than being
 // hardcoded here, so this file doesn't need to change when porting boards.
