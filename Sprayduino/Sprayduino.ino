@@ -155,6 +155,18 @@ volatile unsigned long PulseInterval = 0;
 long RPMPPR = 0;       // set once in setup(), doesn't need volatile
 volatile long RPM = 0;
 
+#if defined(DEBUG)
+// Temporary bench-testing instrumentation: tracks loop() iteration time and
+// prints a min/avg/max summary once a second, rather than every iteration
+// (printing every iteration would itself dominate the timing and give
+// meaningless numbers). Compiles out entirely when DEBUG is off.
+unsigned long LoopTimingWindowStartMillis = 0;
+unsigned long LoopTimingMinMicros = 0xFFFFFFFF;
+unsigned long LoopTimingMaxMicros = 0;
+unsigned long LoopTimingSumMicros = 0;
+unsigned long LoopTimingCount = 0;
+const unsigned long LoopTimingReportIntervalMillis = 1000;
+#endif
 
 //********** SETUP **********//
 
@@ -234,12 +246,21 @@ void setup() {
 #endif
 
   WatchdogEnable();
+
+#if defined(DEBUG)
+  LoopTimingWindowStartMillis = millis();
+#endif
+
 }
 
 
 //********** MAIN LOOP **********//
 
 void loop() {
+
+#if defined(DEBUG)
+  unsigned long loopStartMicros = micros();
+#endif
 
   WatchdogPet(); // must run every iteration - see Watchdog.h
 
@@ -272,6 +293,31 @@ void loop() {
   NitrousOnOff();
 
   UpdateDisplay();
+
+#if defined(DEBUG)
+  unsigned long loopElapsedMicros = micros() - loopStartMicros;
+  if (loopElapsedMicros < LoopTimingMinMicros) LoopTimingMinMicros = loopElapsedMicros;
+  if (loopElapsedMicros > LoopTimingMaxMicros) LoopTimingMaxMicros = loopElapsedMicros;
+  LoopTimingSumMicros += loopElapsedMicros;
+  LoopTimingCount++;
+
+  if (millis() - LoopTimingWindowStartMillis >= LoopTimingReportIntervalMillis) {
+    Serial.print("Loop timing (us) min/avg/max: ");
+    Serial.print(LoopTimingMinMicros);
+    Serial.print("/");
+    Serial.print(LoopTimingSumMicros / LoopTimingCount);
+    Serial.print("/");
+    Serial.print(LoopTimingMaxMicros);
+    Serial.print("  iterations/sec: ");
+    Serial.println(LoopTimingCount);
+
+    LoopTimingMinMicros = 0xFFFFFFFF;
+    LoopTimingMaxMicros = 0;
+    LoopTimingSumMicros = 0;
+    LoopTimingCount = 0;
+    LoopTimingWindowStartMillis = millis();
+  }
+#endif
 
 }
 

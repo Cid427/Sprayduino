@@ -13,8 +13,8 @@
 #define PIN_NITROUS_LED   8   // Nitrous-active indicator LED
 #define PIN_RELAY1        9   // Nitrous stage 1 relay - PWM-capable
 #define PIN_RELAY2        10  // Nitrous stage 2 relay (reserved, unused for now) - PWM-capable
-#define PIN_RELAY3        6  // Nitrous stage 3 relay (reserved, unused for now) - PWM-capable
-#define PIN_STATUS_LED    5  // Controller status LED
+#define PIN_RELAY3        6   // Nitrous stage 3 relay (reserved, unused for now) - PWM-capable
+#define PIN_STATUS_LED    5   // Controller status LED
 #define PIN_THROTTLE_TPS  A2  // Throttle position sensor, analog input
 #define PIN_THROTTLE_SW   16  // Throttle microswitch (Uno quirk: A2 doubles as digital pin 16)
 #define PIN_FUEL_PRESSURE A0  // Reserved for a future fuel pressure sensor - not yet wired
