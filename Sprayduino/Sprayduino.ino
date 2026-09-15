@@ -391,9 +391,9 @@ void CheckTransBrake() {
 #if defined(DEBUG)
         Serial.println("Delay Started");
 #endif
-        NitrousDelay1(); // will set AllowNitrousDelay1 false immediately, true once Delay1Time elapses
+        NitrousDelay1();
       } else {
-        AllowNitrousDelay1 = true; // no post-release delay configured - allow right away
+        AllowNitrousDelay1 = true;
       }
 
       if (SafetyTimeoutFromBrakeRelease) {
@@ -401,6 +401,9 @@ void CheckTransBrake() {
         PreviousSafetyTimeoutMillis = millis();
       }
     } else {
+#if defined(DEBUG)
+      Serial.println("TransBrake Applied");
+#endif
       // Reapplied (re-staged) - re-arm the safety timeout for the next run,
       // and require a fresh release (+ delay, if used) before the next one.
       AllowNitrousSafetyTimeout = true;
