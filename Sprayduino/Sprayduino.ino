@@ -389,7 +389,9 @@ void CheckTransBrake() {
         NitrousDelay1Active = true;
         PreviousDelay1Millis = millis();
 #if defined(DEBUG)
-        Serial.println("Delay Started");
+        Serial.print("Delay Started - target ");
+        Serial.print(Delay1Time / 1000.0, 3);
+        Serial.println("s");
 #endif
         NitrousDelay1();
       } else {
@@ -431,7 +433,9 @@ void NitrousDelay1() {
   if (CurrentMillis - PreviousDelay1Millis >= Delay1Time) {
     AllowNitrousDelay1 = true;
 #if defined(DEBUG)
-    Serial.println("Delay Ended");
+    Serial.print("Delay Ended - actual ");
+    Serial.print((CurrentMillis - PreviousDelay1Millis) / 1000.0, 3);
+    Serial.println("s");
 #endif
     NitrousDelay1Active = false;
   }
@@ -650,25 +654,32 @@ void NitrousOnOff() {
 }
 
 
+const unsigned long DisplayInterval = 250; // milliseconds between debug snapshot prints
+unsigned long PreviousDisplayMillis = 0;
+
 void UpdateDisplay() {
 #if defined(DEBUG)
-  if (ThrottleCurrentStatus != ThrottleLastStatus) {
-    Serial.print(ThrottleCurrentStatus);
-    Serial.print("% ");
-    Serial.print(RPM * 10);
-    Serial.print(" ");
-    Serial.print(BatteryVoltage);    
-    if (TransBrakeState == true) {
-      Serial.print(" ");
-      Serial.print("TransBrake On");
-    }
-    if (NitrousActive == true) {
-      Serial.print(" ");
-      Serial.print("Nitrous Active");
-    }
-    Serial.println();
+  unsigned long currentMillis = millis();
+  if (currentMillis - PreviousDisplayMillis < DisplayInterval) {
+    return;
   }
-  ThrottleLastStatus = ThrottleCurrentStatus;
+  PreviousDisplayMillis = currentMillis;
+
+  Serial.print(ThrottleCurrentStatus);
+  Serial.print("%-TPS ");
+  Serial.print(RPM * 10);
+  Serial.print("-RPM ");
+  Serial.print(BatteryVoltage);
+  Serial.print("-V ");
+  if (TransBrakeState == true) {
+    Serial.print(" ");
+    Serial.print("TransBrake On");
+  }
+  if (NitrousActive == true) {
+    Serial.print(" ");
+    Serial.print("Nitrous Active");
+  }
+  Serial.println();
 #endif
 }
 
